@@ -1,0 +1,695 @@
+#Required packages
+library(dplyr)
+library(foreign)
+library(tidyverse)
+library(ggplot2)
+library(boot)
+require(MASS)
+
+#Data
+getwd()
+setwd("C:/Users/bidis/Dropbox/Q4/smalldata/Mini Project")
+mini_data<-read.csv("CS_subset.csv",na.strings = 'NULL')
+mini_data
+
+#Setting aside data for testing the predictive models
+smp_size <- floor(0.80 * nrow(mini_data))
+## set the seed to make your partition reproductible
+set.seed(123)
+train_score<- sample(seq_len(nrow(mini_data)), size = smp_size)
+#Splitting into test and training data
+train <- mini_data[train_score, ]
+test <- mini_data[-train_score, ]
+ 
+
+#Let's view this data
+View(train)
+
+
+#There are Privacy Suppressed as cells. Lets change them
+train[train=="PrivacySuppressed"] <- NA 
+test[test=="PrivacySuppressed"] <- NA
+View(test)
+#Lets look at the Number of columns, rows and names of columns
+colnames(train)
+rownames(train)
+ncol(train)
+#42
+nrow(train)
+#6243
+head(train)
+tail(train)
+summary(train)
+class(GRAD_DEBT_MDN_SUPP)
+
+#Lets change the factors to numerics
+train$SATVRMID<-as.numeric(train$SATVRMID)
+train$SATMTMID<-as.numeric(train$SATMTMID)
+train$SATWRMID<-as.numeric(train$SATWRMID)
+train$ACTCMMID<-as.numeric(train$ACTCMMID)
+train$ACTENMID<-as.numeric(train$ACTENMID)
+train$gt_25k_p6<-as.numeric(train$gt_25k_p6)
+train$SAT_AVG<-as.numeric(train$SAT_AVG)
+train$GRAD_DEBT_MDN_SUPP<-as.numeric(train$GRAD_DEBT_MDN_SUPP)
+train$md_earn_wne_p10<-as.numeric(train$md_earn_wne_p10)
+train$GRAD_DEBT_MDN_SUPP<-as.numeric(train$GRAD_DEBT_MDN_SUPP)
+train$GRAD_DEBT_MDN10YR_SUPP<-as.numeric(train$GRAD_DEBT_MDN10YR_SUPP)
+train$RPY_3YR_RT_SUPP<-as.numeric(train$RPY_3YR_RT_SUPP)
+train$RET_4TF<-as.numeric(train$RET_FT4)
+class(train$C150_4_POOLED_SUPP)
+train$C150_4_POOLED_SUPP<-as.numeric(train$C150_4_POOLED_SUPP)
+train$C200_L4_POOLED_SUPP<-as.numeric(train$C200_L4_POOLED_SUPP)
+class(train$NPT4_PRIV)
+train$C200_L4_POOLED_SUPP<-as.numeric(train$C200_L4_POOLED_SUPP)
+
+
+#Let's create a new binary response variable
+mean(train$PCTFLOAN,na.rm=T)
+train$new_binary_loan<- 0
+colnames(train)
+train$new_binary_loan[train$PCTFLOAN<0.30]<-"0"
+train$new_binary_loan[train$PCTFLOAN>0.30]<-"1"
+train$new_binary_loan[train$PCTFLOAN==0.30]<-"0"
+train$new_binary_loan[train$PCTFLOAN=="NA"]<-"1"
+#We want only two categories of institution Private and Public.
+#So we merge private for profits and private non-profits
+train$CONTROL[train$CONTROL==3]<-2
+train$new_binary_loan<-as.numeric(train$new_binary_loan)
+
+
+#Section IV
+#Let's look at correlations
+correlations <- cor(train[,c(41,37,34,16,26,27,28,30,42,29,11,14)], 
+                  use="pairwise", method="spearman")
+correlations
+sink("cor.txt")
+correlations
+sink()
+
+summary(train$gt_25k_p6)
+#SAT Average Scores, Earnings and Location of the Institute
+ggplot(data = train) + 
+  geom_point(mapping=aes(x = SAT_AVG , y = gt_25k_p6))+
+  ggtitle("SAT Average Score and Earning over $25,000/year")+
+  xlab("Share of students over 25K/Year") +
+  ylab("Average SAT Score")+
+facet_wrap(~ LOCALE, nrow = 3)
+
+#SAT Average Score, Earnings and Type of Institution
+ggplot(data = train) + 
+  geom_point(mapping=aes(x = SAT_AVG , y = gt_25k_p6))+
+  ggtitle("SAT Average Score and Earning over $25,000/year")+
+  xlab("Share of students over 25K/Year") +
+  ylab("Average SAT Score")+
+  facet_wrap(~ CONTROL, nrow = 1)
+
+#LOan and Institution
+boxplot(PCTFLOAN~CONTROL, data=train,names=c("Public","Private"),
+        main="Federal Student Loan & Institute type",col=c(15,18),cex.axis=0.8,
+        cex.lab=0.8)
+
+#Loan and Locale
+boxplot(PCTFLOAN~LOCALE,data=train,names=c("City L","City M","City S",
+                                           "Suburb L","SUburb M", 
+                                           "Suburb S", "Town-F", 
+                                           "Twn-Dis", "Twn-Rem","Rural-F",
+                                           "Rural-Dis","Rural-Rem"),
+        cex.axis=0.8,las=2,main="Federal Student Loan & Locale")
+
+#Loan and Distance Education
+boxplot(PCTFLOAN~DISTANCEONLY, data=train,names=c("Not Distance Education only", 
+                                                  "Distance Education Only"),
+        main="Federal Students Loan & Distance-Education Only or not",
+        cex.axis =.8)
+
+#Loan and Total Attendance Cost
+ggplot(data = train) + 
+  geom_point(mapping=aes(y=PCTFLOAN, x = NPT4_PUB))+
+   ggtitle("% of students getting Federal Loan and Cost of attendance-Pub Uni")+
+  xlab("Average Net Price in Public institutions") +
+  ylab("% of Students getting Federal Students Loan")
+
+#Loan and Debt
+ggplot(data = train) + 
+  geom_smooth(mapping=aes(y=PCTFLOAN, x = GRAD_DEBT_MDN_SUPP))+
+  ggtitle("% of students getting Federal Loan and Graduate Debt")+
+  xlab("Graduate Debt") +
+  ylab("% of Students getting Federal Students Loan")
+
+#Loan and SAT Score
+ggplot(data = train) + 
+geom_point(mapping=aes(x=PCTFLOAN, y=SAT_AVG),color = "green")+
+  ggtitle("% of students getting Federal Loan and SAT Scores")+
+  ylab("SAT Score") +
+  xlab("% of Students getting Federal Students Loan")
+
+#Loan and ACT Score
+ggplot(data = train) + 
+  geom_smooth(mapping=aes(x=PCTFLOAN, y=ACTCMMID),color="red")+
+  ggtitle("% of students getting Federal Loan and ACT Scores")+
+  ylab("ACT Score") +
+  xlab("% of Students getting Federal Students Loan")
+par(mfrow = c(1,1))
+#Earnings and Institution
+boxplot(md_earn_wne_p10~CONTROL, data=train,names=c("Public","Private"),
+        main="Type of Institution and Median Student Earnings",cex.axis=0.7)
+
+#Location and Earning
+boxplot(md_earn_wne_p10~LOCALE, data=train,names=
+          c("City L","City M","City S",
+          "Suburb L","SUburb M", "Suburb S", "Town-F", 
+           "Twn-Dis", "Twn-Rem","Rural-F","Rural-Dis","Rural-Rem"),
+        main="Median Earnings and Locale of the Institution",
+        las=2,cex.axis =.7)
+
+#Median Earnings and Distance Only
+boxplot(md_earn_wne_p10~DISTANCEONLY, data=train,names=
+          c("Not Distance Education only",
+          "Distance Education Only"),
+        main="Median Students Earning and Distance Only",
+      cex.axis =.7)
+
+#SAT Score and Retention Rate
+ggplot(data = train) + 
+  geom_smooth(mapping=aes(x=SAT_AVG, y = RET_PT4))+
+  ggtitle("SAT Average Score and Retention Rate")+
+  xlab("SAT score") +
+  ylab("Retentioal Rate at 4-year institutions")
+
+
+ggplot(data = train, mapping = aes(x = CONTROL, y = SAT_AVG)) + 
+  geom_boxplot(mapping = aes(group =CONTROL))
+#earnings and ACT scores
+ggplot(data = train) + 
+  geom_point(mapping=aes(x=md_earn_wne_p10, y=ACTCMMID),color="red")+
+  ggtitle("Median Earnings and ACT Scores")+
+  ylab("ACT Score") +
+  xlab("Median Earnings")
+
+#earnings and SAT scores
+ggplot(data = train) + 
+  geom_point(mapping=aes(x=md_earn_wne_p10, y=SAT_AVG),color="blue")+
+  ggtitle("Median Earnings and SAT Scores")+
+  ylab("SAT Score") +
+  xlab("Median Earnings")
+
+#Retention Rate and MEdian Earnings
+ggplot(data = train) + 
+  geom_point(mapping=aes(x=md_earn_wne_p10, y=RET_FT4),color="purple")+
+  ggtitle("Median Earnings and Retentiona Rate")+
+  xlab("Median Earnings") +
+  ylab("Retention Rate")
+
+#Summary Statistics
+by_control<- group_by(train, CONTROL)
+summarise(by_control, Median= mean(md_earn_wne_p10, na.rm = TRUE))
+
+sink("locale.txt")
+by_locale<- group_by(train, LOCALE)
+summarise(by_locale, Median= mean(md_earn_wne_p10, na.rm = TRUE))
+sink()
+
+by_control<- group_by(train, CONTROL)
+summarise(by_control,Undergrads=sum(UGDS,na.rm=T))
+
+sink("cities.txt")
+by_city_uG<- group_by(train, CITY,md_earn_wne_p10)
+summary<-summarise(by_city_uG,Undergrads=sum(UGDS,na.rm=T))
+arrange(summary,desc(Undergrads))
+sink()
+
+sink("Instutions.txt")
+by_institute_earn<- group_by(train, INSTNM)
+summary<-summarise(by_institute_earn,Med_Earn=mean(md_earn_wne_p10))
+arrange(summary,desc(Med_Earn))
+sink()
+sink("col.txt")
+colnames(train)
+sink()
+
+
+
+summary(train)
+train<-train[,c("INSTNM","CITY", "PREDDEG","CONTROL","LOCALE", "UGDS", 
+                "UGDS_WHITE", "UGDS_BLACK",
+                "DISTANCEONLY", "UGDS_HISP","UGDS_ASIAN", "UGDS_AIAN",
+                "UGDS_NHPI","UGDS_2MOR",
+                "UGDS_NRA","UGDS_UNKN", "GRAD_DEBT_MDN_SUPP",
+             "gt_25k_p6",  "PPTUG_EF","PCTPELL","UG25abv","GRAD_DEBT_MDN10YR_SUPP","RPY_3YR_RT_SUPP",
+             "PCTFLOAN","md_earn_wne_p10","new_binary_loan")]
+ncol(train)
+
+smp_size <- floor(0.78* nrow(train))
+## set the seed to make your partition reproductible
+set.seed(123)
+train_set<- sample(seq_len(nrow(train)), size = smp_size)
+#Splitting into test and training data
+train <- train[train_set, ]
+val <- train[-train_set, ]
+View(val)
+nrow(val)
+#1068
+nrow(train)
+#4869
+colnames(train)
+sink("train.txt")
+summary(train)
+sink()
+base_model<-lm(md_earn_wne_p10~PREDDEG+CONTROL+LOCALE+UGDS+DISTANCEONLY+
+                 UGDS_WHITE+UGDS_BLACK+
+              +UGDS_HISP+UGDS_ASIAN+UGDS_AIAN+UGDS_NHPI+UGDS_2MOR+UGDS_NRA+
+                UGDS_UNKN+GRAD_DEBT_MDN_SUPP+
+             + gt_25k_p6 +PPTUG_EF+PCTPELL+UG25abv+GRAD_DEBT_MDN10YR_SUPP+
+               RPY_3YR_RT_SUPP+PCTFLOAN, data=train) 
+base_model
+mse_base<-mean(predict(base_model,val)-val$md_earn_wne_p10,na.rm = T)^2
+mse_base
+#1.219571
+
+#Should we do log transformation?
+par(mfrow = c(2, 2))
+hist(train$UGDS)
+hist(log(train$UGDS))
+hist(train$PPTUG_EF)
+hist(log(train$PPTUG_EF))
+hist(train$PCTPELL)
+#No need
+hist(train$PCTFLOAN)
+#No need
+hist(train$UGDS_ASIAN)
+hist(log(train$U))
+hist(train$UG25abv)
+hist(log(train$UG25abv))
+hist(log((train$gt_25k_p6))
+#No need
+hist(train$md_earn_wne_p10)
+#No need
+hist(train$GRAD_DEBT_MDN10YR_SUPP)
+#No need
+hist(train$RPY_3YR_RT_SUPP)
+#no need
+hist(log(train$UGDS_HISP))
+hist(train$UGDS_HISP)
+
+#Logarithmic transformation
+log_model<-lm(md_earn_wne_p10~PREDDEG+CONTROL+LOCALE+log(UGDS)+DISTANCEONLY+
+                UGDS_WHITE+UGDS_BLACK
+              +UGDS_HISP+UGDS_ASIAN+UGDS_AIAN+UGDS_NHPI+UGDS_2MOR+UGDS_NRA+
+                UGDS_UNKN+GRAD_DEBT_MDN_SUPP+
+                log(gt_25k_p6) +PPTUG_EF+PCTPELL+log(UG25abv)+GRAD_DEBT_MDN10YR_SUPP
+              +RPY_3YR_RT_SUPP+
+                PCTFLOAN, data=train) 
+log_model
+mse_log<-mean(predict(log_model,val)-val$md_earn_wne_p10,na.rm = T)^2
+mse_log
+# 4.584363
+
+#Selective logarithmic transformation
+log_model1<-lm(md_earn_wne_p10~PREDDEG+CONTROL+LOCALE+log(UGDS)+DISTANCEONLY+
+                 log(gt_25k_p6) +PPTUG_EF+PCTPELL+log(UG25abv)+GRAD_DEBT_MDN10YR_SUPP+
+                 GRAD_DEBT_MDN_SUPP +RPY_3YR_RT_SUPP+PCTFLOAN, data=train) 
+log_model1
+mse_log1<-mean(predict(log_model1,val)-val$md_earn_wne_p10,na.rm = T)^2
+mse_log1
+#5.413969
+
+#Interaction
+model_int<-lm(md_earn_wne_p10~PREDDEG+CONTROL+LOCALE+log(UGDS)+DISTANCEONLY+
+                UGDS_WHITE+UGDS_BLACK
+   +UGDS_HISP+UGDS_ASIAN+UGDS_AIAN+UGDS_NHPI+UGDS_2MOR+UGDS_NRA+UGDS_UNKN+GRAD_DEBT_MDN_SUPP+
+     log(gt_25k_p6) +PPTUG_EF+PCTPELL+log(UG25abv)+GRAD_DEBT_MDN10YR_SUPP+
+     RPY_3YR_RT_SUPP+PCTFLOAN+
+     CONTROL:UGDS+ LOCALE:UGDS+ LOCALE:GRAD_DEBT_MDN10YR_SUPP+CONTROL:PCTFLOAN,data=train) 
+model_int
+mse_model_int<-mean(predict(model_int,val)-val$md_earn_wne_p10,na.rm = T)^2
+mse_model_int
+#  5.06305
+
+model_int02<-lm(md_earn_wne_p10 ~ PREDDEG + CONTROL + LOCALE + log(UGDS) + 
+                  DISTANCEONLY + UGDS_WHITE + UGDS_BLACK + UGDS_HISP + UGDS_ASIAN + 
+                  UGDS_AIAN + UGDS_NHPI + UGDS_2MOR + UGDS_NRA + UGDS_UNKN + 
+                  log(gt_25k_p6) + PPTUG_EF + PCTPELL + log(UG25abv) +
+                  GRAD_DEBT_MDN10YR_SUPP 
+                + GRAD_DEBT_MDN_SUPP+ CONTROL:GRAD_DEBT_MDN_SUPP+ LOCALE:GRAD_DEBT_MDN_SUPP+
+                  RPY_3YR_RT_SUPP + PCTFLOAN + LOCALE:PCTPELL + CONTROL:PCTPELL 
+                + LOCALE:UG25abv+
+                  LOCALE:gt_25k_p6 + CONTROL:gt_25k_p6 + CONTROL:UGDS + LOCALE:UGDS + 
+                  LOCALE:GRAD_DEBT_MDN10YR_SUPP + CONTROL:PCTFLOAN + CONTROL:UG25abv + 
+                  +CONTROL:RPY_3YR_RT_SUPP+CONTROL:GRAD_DEBT_MDN10YR_SUPP, data = train) 
+model_int02
+mse_model_int02<-mean(predict(model_int02,val)-val$md_earn_wne_p10,na.rm = T)^2
+mse_model_int02
+#0.05401129
+
+
+library(leaps)
+reg.fwd<- regsubsets(md_earn_wne_p10 ~ PREDDEG+CONTROL+LOCALE+UGDS+DISTANCEONLY
+                     +UGDS_WHITE+UGDS_BLACK+
+                       +UGDS_HISP+UGDS_ASIAN+UGDS_AIAN+UGDS_NHPI+UGDS_2MOR+UGDS_NRA+
+                       UGDS_UNKN+GRAD_DEBT_MDN_SUPP+
+                       + gt_25k_p6 +PPTUG_EF+PCTPELL+UG25abv+GRAD_DEBT_MDN10YR_SUPP+
+                       RPY_3YR_RT_SUPP+PCTFLOAN, data = train, nvmax = 22,method = "forward")
+reg.summary.fwd<-summary(reg.fwd)
+reg.summary.fwd$rsq
+par(mfrow = c(2, 2))
+plot(reg.summary.fwd$cp, xlab = "Number of variables", 
+     ylab = "C_p", type = "l")
+points(which.min(reg.summary.fwd$cp), 
+       reg.summary.fwd$cp[which.min(reg.summary.fwd$cp)], 
+       col = "red", cex = 2, pch = 20)
+plot(reg.summary.fwd$bic, xlab = "Number of variables",
+     ylab = "BIC", type = "l")
+points(which.min(reg.summary.fwd$bic), 
+       reg.summary.fwd$bic[which.min(reg.summary.fwd$bic)], 
+       col = "red", cex = 2, pch = 20)
+plot(reg.summary.fwd$adjr2, xlab = "Number of variables", 
+     ylab = "Adjusted R^2", type = "l")
+points(which.max(reg.summary.fwd$adjr2), 
+       reg.summary.fwd$adjr2[which.max(reg.summary.fwd$adjr2)],
+       col = "red", cex = 2, pch = 20)
+#Which model size is the best?
+which.min(reg.summary.fwd$cp)
+which.min(reg.summary.fwd$bic)
+which.max(reg.summary.fwd$adjr2)
+coef(reg.fwd,which.min(reg.summary.fwd$cp))
+coef(reg.fwd,which.min(reg.summary.fwd$bic))
+coef(reg.fwd,which.max(reg.summary.fwd$adjr2))
+
+model_sub<-lm(md_earn_wne_p10~PREDDEG+CONTROL+LOCALE+UGDS+DISTANCEONLY+UGDS_WHITE+UGDS_BLACK
+              +UGDS_HISP+UGDS_ASIAN+UGDS_2MOR+UGDS_NRA+UGDS_UNKN+
+                gt_25k_p6+PPTUG_EF+PCTPELL+UG25abv+PCTFLOAN,data=train) 
+model_sub
+mse_model_sub<-mean(predict(model_sub,val)-val$md_earn_wne_p10,na.rm = T)^2
+mse_model_sub
+#0.6056338
+
+model_sub1<-lm(md_earn_wne_p10~PREDDEG+CONTROL+LOCALE+UGDS+DISTANCEONLY+UGDS_WHITE+UGDS_BLACK
+              +UGDS_HISP+UGDS_ASIAN+UGDS_2MOR+UGDS_NRA+UGDS_UNKN+
+                gt_25k_p6+PPTUG_EF+UG25abv+PCTFLOAN,data=train) 
+model_sub1
+mse_model_sub1<-mean(predict(model_sub1,val)-val$md_earn_wne_p10,na.rm = T)^2
+mse_model_sub1
+# 0.659195
+
+#BIC
+model_bic<-lm(md_earn_wne_p10~PREDDEG+CONTROL+UGDS+UGDS_WHITE
+               +UGDS_HISP+UGDS_ASIAN+
+                 gt_25k_p6+PPTUG_EF+UG25abv+PCTFLOAN,data=train) 
+model_bic
+mse_model_bic<-mean(predict(model_bic,val)-val$md_earn_wne_p10,na.rm = T)^2
+mse_model_bic
+#0.6546507
+
+reg<- regsubsets(md_earn_wne_p10 ~ PREDDEG+CONTROL+LOCALE+UGDS+DISTANCEONLY+UGDS_WHITE+
+                   UGDS_BLACK+
+                       +UGDS_HISP+UGDS_ASIAN+UGDS_AIAN+UGDS_NHPI+UGDS_2MOR+UGDS_NRA+
+                   UGDS_UNKN+GRAD_DEBT_MDN_SUPP+
+                       + gt_25k_p6 +PPTUG_EF+PCTPELL+UG25abv+GRAD_DEBT_MDN10YR_SUPP+
+                       RPY_3YR_RT_SUPP+PCTFLOAN, data = train, nvmax = 22)
+reg.summary<-summary(reg)
+par(mfrow = c(2, 2))
+plot(reg.summary$cp, xlab = "Number of variables", 
+     ylab = "C_p", type = "l")
+points(which.min(reg.summary$cp), 
+       reg.summary$cp[which.min(reg.summary$cp)], 
+       col = "red", cex = 2, pch = 20)
+plot(reg.summary$bic, xlab = "Number of variables",
+     ylab = "BIC", type = "l")
+points(which.min(reg.summary$bic), 
+       reg.summary$bic[which.min(reg.summary$bic)], 
+       col = "red", cex = 2, pch = 20)
+plot(reg.summary$adjr2, xlab = "Number of variables",
+     ylab = "Adjusted R^2", type = "l")
+points(which.max(reg.summary$adjr2), 
+       reg.summary$adjr2[which.max(reg.summary$adjr2)],
+       col = "red", cex = 2, pch = 20)
+#Which model size is the best?
+which.min(reg.summary$cp)
+which.min(reg.summary$bic)
+which.max(reg.summary$adjr2)
+coef(reg,which.min(reg.summary$cp))
+require(stargazer)
+coef(reg,which.min(reg.summary$bic))
+coef(reg,which.max(reg.summary$adjr2))
+
+
+#BIC
+model_bic<-lm(md_earn_wne_p10 ~ PREDDEG + CONTROL + UGDS + DISTANCEONLY + 
+                UGDS_BLACK + UGDS_ASIAN + UGDS_NRA + gt_25k_p6 + PPTUG_EF + 
+                PCTFLOAN, data = train) 
+model_bic
+mse_model_bic<-mean(predict(model_bic,val)-val$md_earn_wne_p10,na.rm = T)^2
+mse_model_bic
+mse_model_bic<-mean(predict(model_bic,val)-val$md_earn_wne_p10,na.rm = T)^2
+mse_model_bic
+#0.8667391
+
+#R
+model_R<-lm(md_earn_wne_p10~PREDDEG+CONTROL+UGDS+DISTANCEONLY+UGDS_BLACK+
+              UGDS_HISP+UGDS_ASIAN+UGDS_NRA+UGDS_NHPI+ UGDS_NRA +UGDS_UNKN +
+              gt_25k_p6+PPTUG_EF+PCTFLOAN+UG25abv+PCTPELL,data=train) 
+model_R
+mse_model_R<-mean(predict(model_R,val)-val$md_earn_wne_p10,na.rm = T)^2
+mse_model_R
+#0.526634
+
+#cp
+model_cp<-lm(md_earn_wne_p10~PREDDEG+CONTROL+UGDS+DISTANCEONLY+UGDS_BLACK+
+            +UGDS_2MOR+UGDS_ASIAN+UGDS_NRA+UGDS_UNKN +
+              gt_25k_p6+PPTUG_EF+PCTFLOAN+UG25abv,data=train) 
+model_cp
+mse_model_cp<-mean(predict(model_cp,val)-val$md_earn_wne_p10,na.rm = T)^2
+mse_model_cp
+#0.6825785
+
+
+#Testing the regression model
+
+
+#Classification 
+#Model finally chosen
+model_lda<- lda(new_binary_loan~ PREDDEG+CONTROL+LOCALE+UGDS+DISTANCEONLY
+                    +UGDS_WHITE+UGDS_BLACK+md_earn_wne_p10
+                      +UGDS_HISP+UGDS_ASIAN+UGDS_AIAN+UGDS_NHPI+UGDS_2MOR+UGDS_NRA+
+                      UGDS_UNKN+GRAD_DEBT_MDN_SUPP+
+                      + gt_25k_p6 +PPTUG_EF+PCTPELL+UG25abv+GRAD_DEBT_MDN10YR_SUPP+
+                      RPY_3YR_RT_SUPP+PCTFLOAN, family = binomial, 
+                    data=train)
+model_lda
+pred.model_lda<-predict(model_lda, val,type = "response")
+table(pred.model_lda$class, val$new_binary_loan,dnn=c("Prediction","Actual"))
+mean(pred.model_lda$class!=val$new_binary_loan,na.rm = T)
+#0.03120357
+Accuracy=1-0.03120357
+Accuracy
+# 0.9687964
+#False Positive rate:
+FP=8/(8+72)
+FP
+# 0.1
+
+mean(train$new_binary_loan,na.rm=T)
+#0.6939823
+
+#QDA
+model_qda<- qda(new_binary_loan~ PREDDEG+CONTROL+LOCALE+UGDS+DISTANCEONLY
+                    +UGDS_WHITE+UGDS_BLACK+md_earn_wne_p10
+                      +UGDS_HISP+UGDS_ASIAN+UGDS_AIAN+UGDS_NHPI+UGDS_2MOR+UGDS_NRA+
+                      UGDS_UNKN+GRAD_DEBT_MDN_SUPP+
+                      + gt_25k_p6 +PPTUG_EF+PCTPELL+UG25abv+GRAD_DEBT_MDN10YR_SUPP+
+                      RPY_3YR_RT_SUPP+PCTFLOAN, family = binomial, 
+                    data=train)
+pred.model_qda<-predict(model_qda, val,type = "response")
+table(pred.model_qda$class, val$new_binary_loan,dnn=c("Prediction","Actual"))
+mean(pred.model_qda$class!=val$new_binary_loan,na.rm = T)
+# 0.03417533
+Accuracy_QDA=1-0.03417533
+Accuracy_QDA
+#0.9658247
+
+#logistic regression
+model_log <- glm(new_binary_loan ~ PREDDEG+CONTROL+LOCALE+UGDS+DISTANCEONLY
+              +UGDS_WHITE+UGDS_BLACK+md_earn_wne_p10
+              +UGDS_HISP+UGDS_ASIAN+UGDS_AIAN+UGDS_NHPI+UGDS_2MOR+UGDS_NRA+
+                UGDS_UNKN+GRAD_DEBT_MDN_SUPP+
+                + gt_25k_p6 +PPTUG_EF+PCTPELL+UG25abv+GRAD_DEBT_MDN10YR_SUPP+
+                RPY_3YR_RT_SUPP+PCTFLOAN, family = binomial, 
+              data=train)
+summary(model_log)
+
+probs <- predict(model_log, val,type = "response")
+pred.model.log<- rep("0", length(probs))
+pred.model.log[probs > .5] <- "1"
+table(pred.model.log,val$new_binary_loan,dnn=c("Prediction","Actual"))
+mean(pred.model.log!=val$new_binary_loan)
+#0.1573034
+
+
+#lda with interactions
+model_lda_int<- lda(new_binary_loan~ PREDDEG + CONTROL + LOCALE + log(UGDS) + 
+                      DISTANCEONLY + UGDS_WHITE + UGDS_BLACK + UGDS_HISP + UGDS_ASIAN + 
+                      UGDS_AIAN + UGDS_NHPI + UGDS_2MOR + UGDS_NRA + UGDS_UNKN + 
+                      log(gt_25k_p6) + PPTUG_EF + PCTPELL + log(UG25abv) +
+                      GRAD_DEBT_MDN10YR_SUPP +CONTROL:md_earn_wne_p10+md_earn_wne_p10+
+                      LOCALE:md_earn_wne_p10
+                    + GRAD_DEBT_MDN_SUPP+ CONTROL:GRAD_DEBT_MDN_SUPP+ LOCALE:GRAD_DEBT_MDN_SUPP+
+                      RPY_3YR_RT_SUPP + PCTFLOAN + LOCALE:PCTPELL + CONTROL:PCTPELL 
+                    + LOCALE:UG25abv+
+                      LOCALE:gt_25k_p6 + CONTROL:gt_25k_p6 + CONTROL:UGDS + LOCALE:UGDS + 
+                      LOCALE:GRAD_DEBT_MDN10YR_SUPP + CONTROL:PCTFLOAN + CONTROL:UG25abv + 
+                      +CONTROL:RPY_3YR_RT_SUPP+CONTROL:GRAD_DEBT_MDN10YR_SUPP, data = train, 
+                    family = binomial)
+model_lda_int
+pred.test.int <- predict(model_lda_int,val)$class
+#Test error
+table(pred.test.int,val$new_binary_loan,dnn=c("Prediction","Actual"))
+mean(pred.test.int!=val$new_binary_loan,na.rm=T)
+#0.03268945
+
+#Testing the model on the test set
+test$new_binary_loan<- 0
+colnames(test)
+test$new_binary_loan[test$PCTFLOAN<0.30]<-"0"
+test$new_binary_loan[test$PCTFLOAN>0.30]<-"1"
+test$new_binary_loan[test$PCTFLOAN==0.30]<-"0"
+test$new_binary_loan[test$PCTFLOAN=="NA"]<-"1"
+#We want only two categories of institution Private and Public.
+#So we merge private for profits and private non-profits
+test$CONTROL[test$CONTROL==3]<-2
+test$new_binary_loan<-as.numeric(test$new_binary_loan)
+View(test)
+
+test$SATVRMID<-as.numeric(test$SATVRMID)
+test$SATMTMID<-as.numeric(test$SATMTMID)
+test$SATWRMID<-as.numeric(test$SATWRMID)
+test$ACTCMMID<-as.numeric(test$ACTCMMID)
+test$ACTENMID<-as.numeric(test$ACTENMID)
+test$gt_25k_p6<-as.numeric(test$gt_25k_p6)
+test$SAT_AVG<-as.numeric(test$SAT_AVG)
+test$GRAD_DEBT_MDN_SUPP<-as.numeric(test$GRAD_DEBT_MDN_SUPP)
+test$md_earn_wne_p10<-as.numeric(test$md_earn_wne_p10)
+test$GRAD_DEBT_MDN_SUPP<-as.numeric(test$GRAD_DEBT_MDN_SUPP)
+test$GRAD_DEBT_MDN10YR_SUPP<-as.numeric(test$GRAD_DEBT_MDN10YR_SUPP)
+test$RPY_3YR_RT_SUPP<-as.numeric(test$RPY_3YR_RT_SUPP)
+test$RET_4TF<-as.numeric(test$RET_FT4)
+class(test$C150_4_POOLED_SUPP)
+test$C150_4_POOLED_SUPP<-as.numeric(test$C150_4_POOLED_SUPP)
+test$C200_L4_POOLED_SUPP<-as.numeric(test$C200_L4_POOLED_SUPP)
+class(test$NPT4_PRIV)
+test$C200_L4_POOLED_SUPP<-as.numeric(test$C200_L4_POOLED_SUPP)
+
+mse_model_int02_test<-mean(predict(model_int02,test)-test$md_earn_wne_p10,na.rm = T)^2
+mse_model_int02_test
+#0.06704506
+
+
+pred.model_lda_testset<-predict(model_lda, test,type = "response")
+table(pred.model_lda_testset$class, test$new_binary_loan,dnn=c("Prediction","Actual"))
+mean(pred.model_lda_testset$class!=test$new_binary_loan,na.rm = T)
+#0.03243243
+Accuracy<-1-0.03243243
+Accuracy
+#0.9675676
+#False Positive rate:
+FP=9/(9+112)
+FP
+# 0.07438017
+
+
+#Make Inference
+
+model_inf_baseline<-lm(md_earn_wne_p10~PREDDEG+CONTROL+LOCALE+UGDS+DISTANCEONLY+
+                UGDS_WHITE+UGDS_BLACK+
+                +UGDS_HISP+UGDS_ASIAN+UGDS_AIAN+UGDS_NHPI+UGDS_2MOR+UGDS_NRA+
+                UGDS_UNKN+GRAD_DEBT_MDN_SUPP+
+                + gt_25k_p6 +PPTUG_EF+PCTPELL+UG25abv+GRAD_DEBT_MDN10YR_SUPP+
+                RPY_3YR_RT_SUPP+PCTFLOAN, data=train)
+sink("base.txt")
+summary(model_inf_baseline)
+sink()
+require(stargazer)
+stargazer(model_inf_baseline)
+par(mfrow = c(2,2))
+plot(model_inf_baseline)
+
+#Lets make a baseline model with all the models.
+model_inf_baseline<-lm(md_earn_wne_p10~PREDDEG+CONTROL+LOCALE+UGDS+DISTANCEONLY+
+                         UGDS_WHITE+UGDS_BLACK+
+                         +UGDS_HISP+UGDS_ASIAN+UGDS_AIAN+UGDS_NHPI+UGDS_2MOR+UGDS_NRA+
+                         UGDS_UNKN+GRAD_DEBT_MDN_SUPP+
+                         + gt_25k_p6 +PPTUG_EF+PCTPELL+UG25abv+GRAD_DEBT_MDN10YR_SUPP+
+                         RPY_3YR_RT_SUPP+PCTFLOAN, data=train) 
+summary(model_inf_baseline)
+plot(model_inf_baseline)
+bptest(model_inf_baseline)
+#There is heterokedasticity
+
+sink("vif_base.txt")
+vif(model_inf_baseline)
+sink()
+
+model_inf1<-lm(md_earn_wne_p10~PREDDEG+CONTROL+LOCALE+UGDS+DISTANCEONLY+
+                         +GRAD_DEBT_MDN_SUPP+
+                         + gt_25k_p6 +PPTUG_EF+PCTPELL+UG25abv+GRAD_DEBT_MDN10YR_SUPP+
+                         RPY_3YR_RT_SUPP+PCTFLOAN, data=train) 
+sink("inf1.txt")
+summary(model_inf1)
+sink()
+plot(model_inf1)
+bptest(model_inf1)
+sink("vif_base_1.txt")
+vif(model_inf1)
+sink()
+SE_model_inf1<-coeftest(model_inf1, hccm(model_inf1))
+sink("hccm.txt")
+SE_model_inf1
+sink()
+library(boot)
+bs <- function(formula, data, indices) {
+  d <- data[indices,] # allows boot to select sample 
+  fit <- lm(formula, data=d)
+  return(coef(fit)) 
+} 
+# bootstrapping with 1000 replications 
+results <- boot(data=train, statistic=bs, 
+                R=1000, formula=md_earn_wne_p10~PREDDEG+CONTROL+LOCALE+UGDS+DISTANCEONLY+
+                  +GRAD_DEBT_MDN_SUPP+
+                  + gt_25k_p6 +PPTUG_EF+PCTPELL+UG25abv+GRAD_DEBT_MDN10YR_SUPP+
+                  RPY_3YR_RT_SUPP+PCTFLOAN)
+
+# view results
+results
+
+
+# get 95% confidence intervals 
+sink("intercept.txt")
+boot.ci(results , type="basic", index=1)
+sink()# intercept 
+boot.ci(results, type="basic", index=2) # Preddeg
+boot.ci(results, type="basic", index=3) # control
+boot.ci(results, type="basic", index=4) # Locale
+boot.ci(results, type="basic", index=5) # UGDS
+boot.ci(results, type="basic", index=6) # Distanceonly
+boot.ci(results, type="basic", index=7) #Grad debt
+boot.ci(results, type="basic", index=8) # 25K and above
+boot.ci(results, type="basic", index=9) # PPTUG_EF
+boot.ci(results, type="basic", index=10) #PCTPELL 
+boot.ci(results, type="basic", index=11) #Ug25
+boot.ci(results, type="basic", index=12)#GRAD_DEBT_MDN10YR_SUPP
+boot.ci(results, type="basic", index=13) #RPY_3YR_RT_SUPP
+boot.ci(results, type="basic", index=14) #PCTFLOAN
+
+pvals<-c( "4.17e-11","2e-16"," 2.54e-11","0.001894","0.000386","0.011726",
+          "0.285944","2e-16","1.50e-11", "0.796230","0.384347","0.287808",
+          "0.096766"," 7.98e-15")
+
+p.adjust(pvals,method="bonferroni")
+p.adjust(pvals,method="holm")
+
+model_inf_test<-lm(md_earn_wne_p10~PREDDEG+CONTROL+LOCALE+UGDS+DISTANCEONLY+
+                 +GRAD_DEBT_MDN_SUPP+
+                 + gt_25k_p6 +PPTUG_EF+PCTPELL+UG25abv+GRAD_DEBT_MDN10YR_SUPP+
+                 RPY_3YR_RT_SUPP+PCTFLOAN, data=test) 
+sink("model.test.txt")
+summary(model_inf_test)
+sink()
